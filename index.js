@@ -13,7 +13,8 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder
+  EmbedBuilder,
+  StringSelectMenuBuilder
 } from "discord.js";
 
 import { joinVoiceChannel } from "@discordjs/voice";
@@ -44,7 +45,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildPresences
   ]
 });
 
@@ -65,13 +67,11 @@ client.once("ready", async () => {
 
   setInterval(() => {
     client.user.setPresence({
-      activities: [
-        {
-          name: STATUS_LIST[statusIndex],
-          type: ActivityType.Custom,
-          state: STATUS_LIST[statusIndex]
-        }
-      ],
+      activities: [{
+        name: STATUS_LIST[statusIndex],
+        type: ActivityType.Custom,
+        state: STATUS_LIST[statusIndex]
+      }],
       status: "online"
     });
     statusIndex = (statusIndex + 1) % STATUS_LIST.length;
@@ -113,7 +113,7 @@ client.once("ready", async () => {
 /* ================== INTERACTION ================== */
 client.on("interactionCreate", async interaction => {
 
-  /* ===== BUTTON ===== */
+  /* ===== BUTTON (ROLE PANEL) ===== */
   if (interaction.isButton()) {
     const data = panelDB[interaction.customId];
     if (!data) return;
@@ -237,6 +237,25 @@ const saveBotPanel = d =>
   fs.writeJsonSync(BOT_PANEL_DB, d, { spaces: 2 });
 let botPanelDB = loadBotPanel();
 
+/* ===== BOT STATUS CONTROL ===== */
+const BOT_STATUS_CONTROL_DB = "./botStatusControl.json";
+const loadControl = () =>
+  fs.existsSync(BOT_STATUS_CONTROL_DB) ? fs.readJsonSync(BOT_STATUS_CONTROL_DB) : {};
+const saveControl = d =>
+  fs.writeJsonSync(BOT_STATUS_CONTROL_DB, d, { spaces: 2 });
+let controlDB = loadControl();
+
+const STATUS_MAP = {
+  editing: {
+    text: "กำลังแก้ไข",
+    emoji: "<a:emoji_117:1454104365500465378>"
+  },
+  disabled: {
+    text: "ปิดใช้งานชั่วคราว",
+    emoji: "<a:emoji_215:1454116841923281153>"
+  }
+};
+
 /* ===== REGISTER EXTRA COMMAND ===== */
 client.once("ready", async () => {
   const cmd = new SlashCommandBuilder()
@@ -250,7 +269,7 @@ client.once("ready", async () => {
   });
 });
 
-/* ===== CREATE PANEL ===== */
+/* ===== CREATE BOT STATUS PANEL ===== */
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "botstatus") return;
@@ -280,7 +299,65 @@ client.on("interactionCreate", async interaction => {
   interaction.reply({ content: "✅ สร้าง Bot Status Panel แล้ว", ephemeral: true });
 });
 
-/* ===== REALTIME UPDATE EVERY 0.5s ===== */
+/* ===== BUTTON → SELECT BOT ===== */
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isButton()) return;
+  if (interaction.customId !== "botpanel_edit") return;
+  if (interaction.user.id !== interaction.guild.ownerId)
+    return interaction.reply({ content: "❌ Owner เท่านั้น", ephemeral: true });
+
+  const bots = interaction.guild.members.cache.filter(m => m.user.bot);
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("select_bot")
+      .setPlaceholder("เลือกบอท")
+      .addOptions(
+        bots.map(b => ({
+          label: b.user.username,
+          value: b.id
+        }))
+      )
+  );
+
+  interaction.reply({ content: "🤖 เลือกบอท", components: [row], ephemeral: true });
+});
+
+/* ===== SELECT BOT → SELECT STATUS ===== */
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isStringSelectMenu()) return;
+  if (interaction.customId !== "select_bot") return;
+
+  const botId = interaction.values[0];
+
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId(`select_status:${botId}`)
+      .setPlaceholder("เลือกสถานะ")
+      .addOptions([
+        { label: "กำลังแก้ไข", value: "editing" },
+        { label: "ปิดใช้งานชั่วคราว", value: "disabled" }
+      ])
+  );
+
+  interaction.update({ content: "⚙️ เลือกสถานะ", components: [row] });
+});
+
+/* ===== APPLY STATUS ===== */
+client.on("interactionCreate", async interaction => {
+  if (!interaction.isStringSelectMenu()) return;
+  if (!interaction.customId.startsWith("select_status:")) return;
+
+  const botId = interaction.customId.split(":")[1];
+  const status = interaction.values[0];
+
+  controlDB[botId] = status;
+  saveControl(controlDB);
+
+  interaction.update({ content: "✅ อัปเดตสถานะแล้ว", components: [] });
+});
+
+/* ===== REALTIME PANEL UPDATE (0.5s) ===== */
 setInterval(async () => {
   for (const gid in botPanelDB) {
     const data = botPanelDB[gid];
@@ -298,11 +375,18 @@ setInterval(async () => {
     let desc = `<a:emoji_45:1450268441784221736> ┊͙สถานะ บอท xSwift Hbu ✧˖*°\n\n╭── ⋅ ⋅ ✩ ⋅ ⋅ ──╮\n`;
 
     bots.forEach(b => {
-      const online = b.presence?.status === "online";
+      const override = controlDB[b.id];
       desc += `<a:1001:1451585309757149227> | ${b}\n`;
-      desc += `${online
-        ? "<a:green_cycle:1454103922254811280> | สถานะ : ออนไลน์"
-        : "<a:__:1454104236018368594> | สถานะ : ออฟไลน์"}\n`;
+
+      if (override && STATUS_MAP[override]) {
+        desc += `${STATUS_MAP[override].emoji} | สถานะ : ${STATUS_MAP[override].text}\n`;
+      } else {
+        const online = b.presence?.status === "online";
+        desc += `${online
+          ? "<a:green_cycle:1454103922254811280> | สถานะ : ออนไลน์"
+          : "<a:__:1454104236018368594> | สถานะ : ออฟไลน์"}\n`;
+      }
+
       desc += `<a:phakaphop43:1454105164003934337> | ระบบ : สเถียร 95%\n`;
       desc += `<a:emoji_46:1451252945424351310> | ทำงาน : 24/7 Day\n\n`;
     });
