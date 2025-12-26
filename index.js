@@ -17,7 +17,11 @@ import {
   StringSelectMenuBuilder
 } from "discord.js";
 
-import { joinVoiceChannel } from "@discordjs/voice";
+import {
+  joinVoiceChannel,
+  getVoiceConnection,
+  VoiceConnectionStatus
+} from "@discordjs/voice";
 
 import express from "express";
 import dotenv from "dotenv";
@@ -103,7 +107,11 @@ client.once("ready", async () => {
           .setDescription("ช่องแจ้งเตือน Log")
           .setRequired(true)
           .addChannelTypes(ChannelType.GuildText)
-      )
+      ),
+
+    new SlashCommandBuilder()
+      .setName("botstatus")
+      .setDescription("สร้าง Panel แสดงสถานะบอททั้งหมด (Owner)")
   ];
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -154,7 +162,6 @@ client.on("interactionCreate", async interaction => {
 > | <a:1001:1451585309757149227>・ยินดีต้อนรับทุกคนน้า
 > | <a:__:1451387639268642999>・อ่านกฎที่ห้องนี้ https://discord.com/channels/1449115718472826957/1449126363725561896
 ╰ ┈ ✧ :• ➵ Bყ Zҽɱσɳ Źx <a:__:1451387432527335605>`);
-
       logChannel.send({ embeds: [logEmbed] });
     }
 
@@ -173,11 +180,28 @@ client.on("interactionCreate", async interaction => {
     await interaction.deferReply({ ephemeral: true });
 
     const channel = interaction.options.getChannel("channel");
-    joinVoiceChannel({
-      channelId: channel.id,
-      guildId: channel.guild.id,
-      adapterCreator: channel.guild.voiceAdapterCreator,
-      selfDeaf: false
+
+    let connection = getVoiceConnection(channel.guild.id);
+    if (!connection) {
+      connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+        selfDeaf: true,
+        selfMute: true
+      });
+    }
+
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        joinVoiceChannel({
+          channelId: channel.id,
+          guildId: channel.guild.id,
+          adapterCreator: channel.guild.voiceAdapterCreator,
+          selfDeaf: true,
+          selfMute: true
+        });
+      } catch {}
     });
 
     return interaction.editReply(
@@ -274,20 +298,62 @@ const STATUS_MAP = {
   }
 };
 
-/* ===== REGISTER /botstatus ===== */
-client.once("ready", async () => {
-  const cmd = new SlashCommandBuilder()
-    .setName("botstatus")
-    .setDescription("สร้าง Panel แสดงสถานะบอททั้งหมด (Owner)");
+/* ===== CREATE / UPDATE BOT STATUS PANEL ===== */
+async function updateBotPanel(guildId) {
+  const data = botPanelDB[guildId];
+  if (!data) return;
 
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
-  const old = await rest.get(Routes.applicationCommands(CLIENT_ID));
-  await rest.put(Routes.applicationCommands(CLIENT_ID), {
-    body: [...old, cmd.toJSON()]
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
+
+  const channel = guild.channels.cache.get(data.channelId);
+  if (!channel) return;
+
+  const msg = await channel.messages.fetch(data.messageId).catch(() => null);
+  if (!msg) return;
+
+  const bots = guild.members.cache.filter(m => m.user.bot);
+
+  let desc =
+    `<a:emoji_45:1450268441784221736> ┊͙สถานะ บอท xSwift Hbu ✧˖*°\n\n` +
+    `╭── ⋅ ⋅ ✩ ⋅ ⋅ ──╮\n`;
+
+  bots.forEach(b => {
+    const override = controlDB[b.id];
+    desc += `<a:1001:1451585309757149227> | ${b}\n`;
+
+    if (override && STATUS_MAP[override]) {
+      desc += `${STATUS_MAP[override].emoji} | สถานะ : ${STATUS_MAP[override].text}\n`;
+    } else {
+      const online = b.presence?.status === "online";
+      desc += online
+        ? "<a:green_cycle:1454103922254811280> | สถานะ : ออนไลน์\n"
+        : "<a:__:1454104236018368594> | สถานะ : ออฟไลน์\n";
+    }
+
+    desc += `<a:phakaphop43:1454105164003934337> | ระบบ : สเถียร 95%\n`;
+    desc += `<a:emoji_46:1451252945424351310> | ทำงาน : 24/7 Day\n\n`;
   });
+
+  desc += `╰── ⋅ ⋅ ✩ ⋅ ⋅ ──╯`;
+
+  await msg.edit({
+    embeds: [EmbedBuilder.from(msg.embeds[0]).setDescription(desc)]
+  });
+}
+
+/* ===== REALTIME EVENTS ===== */
+client.on("presenceUpdate", (_, newP) => {
+  if (newP?.guild) updateBotPanel(newP.guild.id);
+});
+client.on("guildMemberAdd", m => {
+  if (m.user.bot) updateBotPanel(m.guild.id);
+});
+client.on("guildMemberRemove", m => {
+  if (m.user.bot) updateBotPanel(m.guild.id);
 });
 
-/* ===== CREATE BOT STATUS PANEL ===== */
+/* ===== BOT STATUS PANEL COMMAND ===== */
 client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.commandName !== "botstatus") return;
@@ -318,6 +384,8 @@ client.on("interactionCreate", async interaction => {
     messageId: msg.id
   };
   saveBotPanel(botPanelDB);
+
+  await updateBotPanel(interaction.guild.id);
 
   interaction.reply({
     content: "✅ สร้าง Bot Status Panel แล้ว",
@@ -370,6 +438,8 @@ client.on("interactionCreate", async interaction => {
   controlDB = {};
   saveControl(controlDB);
 
+  await updateBotPanel(interaction.guild.id);
+
   interaction.reply({
     content: "♻️ รีเซ็ตสถานะบอททั้งหมดกลับเป็นออนไลน์แล้ว",
     ephemeral: true
@@ -410,53 +480,17 @@ client.on("interactionCreate", async interaction => {
   controlDB[botId] = status;
   saveControl(controlDB);
 
+  await updateBotPanel(interaction.guild.id);
+
   interaction.update({
     content: "✅ อัปเดตสถานะแล้ว",
     components: []
   });
 });
 
-/* ===== REALTIME PANEL UPDATE ===== */
-setInterval(async () => {
-  for (const gid in botPanelDB) {
-    const data = botPanelDB[gid];
-    const guild = client.guilds.cache.get(gid);
-    if (!guild) continue;
-
-    const channel = guild.channels.cache.get(data.channelId);
-    if (!channel) continue;
-
-    const msg = await channel.messages.fetch(data.messageId).catch(() => null);
-    if (!msg) continue;
-
-    const bots = guild.members.cache.filter(m => m.user.bot);
-
-    let desc =
-      `<a:emoji_45:1450268441784221736> ┊͙สถานะ บอท xSwift Hbu ✧˖*°\n\n` +
-      `╭── ⋅ ⋅ ✩ ⋅ ⋅ ──╮\n`;
-
-    bots.forEach(b => {
-      const override = controlDB[b.id];
-      desc += `<a:1001:1451585309757149227> | ${b}\n`;
-
-      if (override && STATUS_MAP[override]) {
-        desc +=
-          `${STATUS_MAP[override].emoji} | สถานะ : ${STATUS_MAP[override].text}\n`;
-      } else {
-        const online = b.presence?.status === "online";
-        desc += online
-          ? "<a:green_cycle:1454103922254811280> | สถานะ : ออนไลน์\n"
-          : "<a:__:1454104236018368594> | สถานะ : ออฟไลน์\n";
-      }
-
-      desc += `<a:phakaphop43:1454105164003934337> | ระบบ : สเถียร 95%\n`;
-      desc += `<a:emoji_46:1451252945424351310> | ทำงาน : 24/7 Day\n\n`;
-    });
-
-    desc += `╰── ⋅ ⋅ ✩ ⋅ ⋅ ──╯`;
-
-    await msg.edit({
-      embeds: [EmbedBuilder.from(msg.embeds[0]).setDescription(desc)]
-    });
-  }
-}, 500);
+/* ===== DISABLED INTERVAL (KEPT AS REQUESTED) ===== */
+// setInterval(async () => {
+//   for (const gid in botPanelDB) {
+//     await updateBotPanel(gid);
+//   }
+// }, 500);
