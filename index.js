@@ -123,7 +123,7 @@ client.on("interactionCreate", async interaction => {
       const logEmbed = new EmbedBuilder()
         .setImage("https://cdn.discordapp.com/attachments/1449115719479590984/1454084713579941938/1be0c476c8a40fbe206e2fbc6c5d213c.jpg")
         .setDescription(`◤──•~❉᯽❉~•──◥◤──•~❉᯽❉~•──◥
-        <a:3005:1451585834649391144> ${interaction.user} <a:3007:1451585403751633170>
+<a:3005:1451585834649391144> ${interaction.user} <a:3007:1451585403751633170>
 ◣──•~❉᯽❉~•──◢◣──•~❉᯽❉~•──◢
 ╭┈ ✧ : ยินดีต้อนรับน้า ˗ˏˋ ꒰ <a:emoji_27:1449151549602271526>  ꒱
 > | <a:emoji_24:1449151433130639370>・เข้าสู่ ${interaction.guild.name}
@@ -141,6 +141,29 @@ client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
   if (interaction.user.id !== interaction.guild.ownerId)
     return interaction.reply({ content: "❌ Owner เท่านั้น", ephemeral: true });
+
+  /* ===== VOICE 24/7 ===== */
+  if (interaction.commandName === "voice24") {
+    await interaction.deferReply({ ephemeral: true });
+
+    const channel = interaction.options.getChannel("channel");
+
+    try {
+      const connection = joinVoiceChannel({
+        channelId: channel.id,
+        guildId: channel.guild.id,
+        adapterCreator: channel.guild.voiceAdapterCreator,
+        selfDeaf: false
+      });
+
+      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
+
+      return interaction.editReply(`✅ บอทออนช่อง **${channel.name}** เรียบร้อย (24/7)`);
+    } catch (err) {
+      console.error(err);
+      return interaction.editReply("❌ ไม่สามารถเข้า Voice Channel ได้");
+    }
+  }
 
   /* ===== ROLE PANEL ===== */
   if (interaction.commandName === "rolepanel") {
@@ -164,8 +187,9 @@ client.on("interactionCreate", async interaction => {
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(id)
-        .setLabel("<a:__:1451387747800711189> กดรับยศ")
-        .setStyle(ButtonStyle.Primary) // ฟ้ามิ้นเรืองแสง
+        .setLabel("กดรับยศ")
+        .setEmoji({ id: "1449150980179366024", animated: true })
+        .setStyle(ButtonStyle.Primary)
     );
 
     await interaction.channel.send({ embeds: [embed], components: [row] });
