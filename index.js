@@ -63,7 +63,6 @@ let statusIndex = 0;
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  // ✅ Custom Status ใต้โปรไฟล์ (แบบรูปที่ 3)
   setInterval(() => {
     client.user.setPresence({
       activities: [
@@ -75,7 +74,6 @@ client.once("ready", async () => {
       ],
       status: "online"
     });
-
     statusIndex = (statusIndex + 1) % STATUS_LIST.length;
   }, 3000);
 
@@ -121,8 +119,19 @@ client.on("interactionCreate", async interaction => {
     if (!data) return;
 
     const role = interaction.guild.roles.cache.get(data.roleId);
-    if (!role) return interaction.reply({ content: "❌ ไม่พบยศ", ephemeral: true });
+    if (!role) {
+      return interaction.reply({ content: "❌ ไม่พบยศ", ephemeral: true });
+    }
 
+    // 🔒 เช็คว่ามียศแล้วหรือยัง
+    if (interaction.member.roles.cache.has(role.id)) {
+      return interaction.reply({
+        content: "⚠️ คุณรับยศนี้ไปแล้วนะ\nระบบอนุญาตให้กดรับยศได้เพียง 1 ครั้งเท่านั้น",
+        ephemeral: true
+      });
+    }
+
+    // ✅ ยังไม่มียศ → ให้ยศ
     await interaction.member.roles.add(role);
 
     const logChannel = interaction.guild.channels.cache.get(data.logChannelId);
@@ -142,20 +151,22 @@ client.on("interactionCreate", async interaction => {
       logChannel.send({ embeds: [logEmbed] });
     }
 
-    return interaction.reply({ content: `✅ รับยศ ${role.name} แล้ว`, ephemeral: true });
+    return interaction.reply({
+      content: `✅ รับยศ ${role.name} เรียบร้อยแล้ว`,
+      ephemeral: true
+    });
   }
 
   if (!interaction.isChatInputCommand()) return;
   if (interaction.user.id !== interaction.guild.ownerId)
     return interaction.reply({ content: "❌ Owner เท่านั้น", ephemeral: true });
 
-  /* ===== VOICE 24/7 (FIX REAL) ===== */
+  /* ===== VOICE 24/7 ===== */
   if (interaction.commandName === "voice24") {
     await interaction.deferReply({ ephemeral: true });
 
     const channel = interaction.options.getChannel("channel");
 
-    // ✅ แค่เรียก join = ถือว่าสำเร็จ
     joinVoiceChannel({
       channelId: channel.id,
       guildId: channel.guild.id,
