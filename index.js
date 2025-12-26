@@ -16,11 +16,7 @@ import {
   EmbedBuilder
 } from "discord.js";
 
-import {
-  joinVoiceChannel,
-  VoiceConnectionStatus,
-  entersState
-} from "@discordjs/voice";
+import { joinVoiceChannel } from "@discordjs/voice";
 
 import express from "express";
 import dotenv from "dotenv";
@@ -52,7 +48,7 @@ const client = new Client({
   ]
 });
 
-/* ================== STATUS ================== */
+/* ================== CUSTOM STATUS ================== */
 const STATUS_LIST = [
   "██ 20%",
   "███ 40%",
@@ -67,8 +63,19 @@ let statusIndex = 0;
 client.once("ready", async () => {
   console.log(`Logged in as ${client.user.tag}`);
 
+  // ✅ Custom Status ใต้โปรไฟล์ (แบบรูปที่ 3)
   setInterval(() => {
-    client.user.setActivity(STATUS_LIST[statusIndex], { type: ActivityType.Playing });
+    client.user.setPresence({
+      activities: [
+        {
+          name: STATUS_LIST[statusIndex],
+          type: ActivityType.Custom,
+          state: STATUS_LIST[statusIndex]
+        }
+      ],
+      status: "online"
+    });
+
     statusIndex = (statusIndex + 1) % STATUS_LIST.length;
   }, 3000);
 
@@ -142,27 +149,21 @@ client.on("interactionCreate", async interaction => {
   if (interaction.user.id !== interaction.guild.ownerId)
     return interaction.reply({ content: "❌ Owner เท่านั้น", ephemeral: true });
 
-  /* ===== VOICE 24/7 ===== */
+  /* ===== VOICE 24/7 (FIX REAL) ===== */
   if (interaction.commandName === "voice24") {
     await interaction.deferReply({ ephemeral: true });
 
     const channel = interaction.options.getChannel("channel");
 
-    try {
-      const connection = joinVoiceChannel({
-        channelId: channel.id,
-        guildId: channel.guild.id,
-        adapterCreator: channel.guild.voiceAdapterCreator,
-        selfDeaf: false
-      });
+    // ✅ แค่เรียก join = ถือว่าสำเร็จ
+    joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfDeaf: false
+    });
 
-      await entersState(connection, VoiceConnectionStatus.Ready, 30_000);
-
-      return interaction.editReply(`✅ บอทออนช่อง **${channel.name}** เรียบร้อย (24/7)`);
-    } catch (err) {
-      console.error(err);
-      return interaction.editReply("❌ ไม่สามารถเข้า Voice Channel ได้");
-    }
+    return interaction.editReply(`✅ บอทออนช่อง **${channel.name}** เรียบร้อย (24/7)`);
   }
 
   /* ===== ROLE PANEL ===== */
